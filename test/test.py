@@ -4,14 +4,14 @@
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import ClockCycles
-
+import random
 
 @cocotb.test()
-async def test_project(dut):
-    dut._log.info("Start")
+async def test_multiplier(dut):
+    dut._log.info("Start Multiplier Test")
 
-    # Set the clock period to 10 us (100 KHz)
-    clock = Clock(dut.clk, 10, unit="us")
+    # Set the clock period to 20 ns (50 MHz) to match your timing constraint
+    clock = Clock(dut.clk, 20, unit="ns")
     cocotb.start_soon(clock.start())
 
     # Reset
@@ -23,17 +23,36 @@ async def test_project(dut):
     await ClockCycles(dut.clk, 10)
     dut.rst_n.value = 1
 
-    dut._log.info("Test project behavior")
+    dut._log.info("Test edge cases")
+    
+    # Optional: Test specifically for max values (255 * 255 = 65025)
+    dut.ui_in.value = 255
+    dut.uio_in.value = 255
+    await ClockCycles(dut.clk, 1) # Combinational logic takes 1 clock cycle to register out
+    
+    actual_val = (int(dut.uio_out.value) << 8) | int(dut.uo_out.value)
+    assert actual_val == 65025, f"Max value failed! Expected 65025, got {actual_val}"
 
-    # Set the input values you want to test
-    dut.ui_in.value = 20
-    dut.uio_in.value = 30
+    dut._log.info("Run randomized fuzz testing")
 
-    # Wait for one clock cycle to see the output values
-    await ClockCycles(dut.clk, 1)
+    # Loop through 100 random multiplications
+    for i in range(100):
+        val_a = random.randint(0, 255)
+        val_b = random.randint(0, 255)
 
-    # The following assersion is just an example of how to check the output values.
-    # Change it to match the actual expected output of your module:
+        # Drive inputs
+        dut.ui_in.value = val_a
+        dut.uio_in.value = val_b
 
-    # Keep testing the module by changing the input values, waiting for
-    # one or more clock cycles, and asserting the expected output values.
+        # Wait one cycle for the combinational path to resolve and register
+        await ClockCycles(dut.clk, 1)
+
+        # Read output pins and combine the two 8-bit ports into a 16-bit integer
+        expected_val = val_a * val_b
+        actual_val = (int(dut.uio_out.value) << 8) | int(dut.uo_out.value)
+
+        # Assert halts the testbench and throws an error if timing/logic is wrong
+        assert actual_val == expected_val, \
+            f"Failed on {val_a} * {val_b}: Expected {expected_val}, got {actual_val}"
+
+    dut._log.info("All multiplier tests passed perfectly!")
